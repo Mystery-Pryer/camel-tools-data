@@ -1,0 +1,56 @@
+name: 8C-1E CALIMA-GLF Morphology Transform Dry Run
+
+on:
+  push:
+    branches:
+      - feat/checkpoint-8c1e-calima-glf-dry-run
+    paths:
+      - scripts/processing/transform_calima_glf_subset.py
+      - .github/workflows/dry-run-calima-glf-transform.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned transform dependency
+        run: python -m pip install --disable-pip-version-check pyarrow==21.0.0
+
+      - name: Fetch exact CALIMA-GLF morphology archive
+        run: |
+          curl --fail --location --retry 3 --silent --show-error \
+            "https://github.com/CAMeL-Lab/camel-tools-data/releases/download/2022.03.30/morphology_db_calima-glf-01-0.1.0.zip" \
+            --output "$RUNNER_TEMP/morphology_db_calima-glf-01-0.1.0.zip"
+
+      - name: Transform section-complete 20-row morphology subset and validate
+        run: |
+          python scripts/processing/transform_calima_glf_subset.py \
+            --archive "$RUNNER_TEMP/morphology_db_calima-glf-01-0.1.0.zip" \
+            --output-parquet "$RUNNER_TEMP/calima_glf_morphology_subset.parquet" \
+            --manifest "$RUNNER_TEMP/calima_glf_dry_run_manifest.json"
+          python -m json.tool "$RUNNER_TEMP/calima_glf_dry_run_manifest.json" >/dev/null
+          test -s "$RUNNER_TEMP/calima_glf_morphology_subset.parquet"
+
+      - name: Ensure manifest contains no source morphology payload
+        run: |
+          ! grep -q '"raw_record"' "$RUNNER_TEMP/calima_glf_dry_run_manifest.json"
+          ! grep -q '"surface_form"' "$RUNNER_TEMP/calima_glf_dry_run_manifest.json"
+          ! grep -q '"source_analysis_attributes"' "$RUNNER_TEMP/calima_glf_dry_run_manifest.json"
+          ! grep -q '"source_default_attributes"' "$RUNNER_TEMP/calima_glf_dry_run_manifest.json"
+
+      - name: Upload validation manifest only
+        uses: actions/upload-artifact@v4
+        with:
+          name: calima-glf-transform-dry-run-manifest
+          path: ${{ runner.temp }}/calima_glf_dry_run_manifest.json
+          retention-days: 14
+          if-no-files-found: error
